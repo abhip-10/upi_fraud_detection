@@ -1,201 +1,181 @@
-# main_app.py
-# -----------------------------------------------------------------------------
-# This script creates a Flask web server with two API endpoints to detect
-# potential fraud in UPI (Unified Payments Interface) transactions.
-#
-# 1. /predict_text: Analyzes a string of text using a pre-trained NLP model
-#    (DistilBERT) to assess the risk based on sentiment and tone.
-# 2. /predict_transaction: Analyzes a structured set of transaction data
-#    using a pre-trained scikit-learn model to predict if it is fraudulent.
-#
-# --- SETUP INSTRUCTIONS ---
-# 1. Install dependencies:
-#    pip install pandas flask flask_cors transformers torch scikit-learn
-#
-# 2. Place your trained model file in the same directory as this script.
-#    This script expects it to be named 'all_models.pkl'.
-#
-# 3. Run the server:
-#    python main_app.py
-#
-# 4. The server will start at http://127.0.0.1:5000. Open the HTML file
-#    in your browser to interact with the application.
-# -----------------------------------------------------------------------------
-
-import pickle
 import os
+import pickle
+import numpy as np
 import pandas as pd
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
-import torch
-import logging
+from transformers import pipeline
+import re
 
-# --- 1. APPLICATION SETUP ---
+# --- Initialize Flask App ---
 app = Flask(__name__)
-# Enable Cross-Origin Resource Sharing (CORS) to allow the frontend HTML
-# file to make requests to this server.
-CORS(app)
+CORS(app) 
 
-# Configure logging to display informative messages in the console.
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-
-# --- 2. LOAD MODELS ON STARTUP ---
-nlp_pipeline = None
-ml_model = None
+# --- Global Variables for Models ---
+sentiment_pipeline = None
+tabular_model = None
+scaler = None
 feature_names = None
-MODEL_PATH = 'all_models.pkl'
-NLP_MODEL_NAME = 'distilbert-base-uncased-finetuned-sst-2-english'
 
-def load_nlp_pipeline():
-    """Loads the Hugging Face Transformer pipeline for text analysis."""
-    global nlp_pipeline
+# --- Model Loading Function ---
+def load_models():
+    """Loads both the FinBERT sentiment model and the scikit-learn tabular model."""
+    global sentiment_pipeline, tabular_model, scaler, feature_names
+    
+    # 1. Load FinBERT Model for Sentiment Analysis
     try:
-        logger.info(f"Loading NLP pipeline with model: {NLP_MODEL_NAME}")
-        # Use GPU if available for faster processing, otherwise default to CPU.
-        device = 0 if torch.cuda.is_available() else -1
-        if device == -1:
-            logger.warning("No GPU detected. Using CPU for the NLP model, which may be slower.")
-
-        tokenizer = AutoTokenizer.from_pretrained(NLP_MODEL_NAME)
-        model = AutoModelForSequenceClassification.from_pretrained(NLP_MODEL_NAME)
-        nlp_pipeline = pipeline("sentiment-analysis", model=model, tokenizer=tokenizer, device=device)
-        logger.info("✅ NLP pipeline loaded successfully.")
+        print("Loading Hugging Face model: ProsusAI/finbert...")
+        sentiment_pipeline = pipeline(
+            "sentiment-analysis", 
+            model="ProsusAI/finbert"
+        )
+        print("--- FinBERT model loaded successfully! ---")
     except Exception as e:
-        logger.error(f"❌ Failed to load NLP pipeline: {str(e)}")
-        nlp_pipeline = None
+        print(f"--- FATAL: Could not load FinBERT model. Error: {e} ---")
 
-def load_ml_model():
-    """Loads the trained scikit-learn model from the pickle file."""
-    global ml_model, feature_names
-    if not os.path.exists(MODEL_PATH):
-        logger.warning(f"⚠️ Model file '{MODEL_PATH}' not found. Transaction prediction will not be available.")
-        return
-
+    # 2. Load Scikit-learn Tabular Model
     try:
-        logger.info(f"Loading ML model from '{MODEL_PATH}'...")
-        with open(MODEL_PATH, 'rb') as f:
+        print("Loading scikit-learn tabular model from 'all_models.pkl'...")
+        with open('all_models.pkl', 'rb') as f:
             data = pickle.load(f)
+            tabular_model = data['models']['Stacked Ensemble'] 
+            scaler = data['scaler']
+            feature_names = data['feature_names']
+        print("--- Scikit-learn tabular model loaded successfully! ---")
+    except FileNotFoundError:
+        print("--- WARNING: 'all_models.pkl' not found. Full transaction analysis will be disabled. ---")
+    except Exception as e:
+        print(f"--- FATAL: Could not load scikit-learn model. Error: {e} ---")
+
+# --- IMPROVEMENT: Expanded keyword lists and new list for legitimate negative scenarios ---
+def interpret_sentiment(sentiment_result, text):
+    """
+    Interprets FinBERT sentiment to determine fraud risk. This version is more robust 
+    and handles legitimate negative alerts to reduce false positives.
+    """
+    sentiment = sentiment_result[0]['label']
+    score = sentiment_result[0]['score']
+    text_lower = text.lower()
+    
+    # Expanded keyword lists
+    positive_scam_keywords = ['won', 'lottery', 'claim', 'prize', 'cashback', 'winner', 'free giveaway']
+    neutral_scam_keywords = ['security deposit', 'verify your details', 'customs fee', 'pending bill', 'update kyc', 'confirm your details']
+    negative_scam_keywords = ['suspended', 'unusual activity', 'account blocked', 'action required', 'security breach']
+    
+    # EDGE CASE HANDLING: List of keywords that indicate a legitimate negative message
+    legitimate_negative_keywords = ['overdue', 'bill is due', 'late fee', 'payment reminder', 'low balance']
+    
+    if sentiment == 'negative':
+        # If the sentiment is negative, first check if it's a legitimate warning.
+        if any(re.search(r'\b' + keyword + r'\b', text_lower) for keyword in legitimate_negative_keywords):
+            return False, score # It's a real but negative alert, not fraud.
+        # If no legitimate keywords are found, a negative sentiment is a strong fraud indicator.
+        # This also catches generic negative scam keywords.
+        is_fraud = True
+        confidence = score + (1 - score) * 0.5 # Boost confidence for negative alerts
+        return is_fraud, confidence
+
+    if sentiment == 'positive':
+        if any(re.search(r'\b' + keyword + r'\b', text_lower) for keyword in positive_scam_keywords):
+            return True, 0.95 # Very high confidence for positive-keyword scams
+        return False, score
+
+    if sentiment == 'neutral':
+        if any(re.search(r'\b' + keyword + r'\b', text_lower) for keyword in neutral_scam_keywords):
+            return True, 0.88 # High confidence for neutral-keyword scams
+        return False, score
         
-        # The model is stored in a dictionary; retrieve the ensemble model and feature names.
-        ml_model = data['models'].get('Voting Ensemble') or data['models'].get('Stacked Ensemble')
-        feature_names = data['feature_names']
-        
-        if ml_model is None:
-            raise ValueError("No valid ensemble model found in the pickle file.")
+    return False, 0.0
+
+# --- API Endpoint for Prediction ---
+@app.route('/predict', methods=['POST'])
+def predict():
+    if not sentiment_pipeline and not tabular_model:
+        return jsonify({'error': 'No models are available. Check server logs.'}), 500
+
+    try:
+        data = request.get_json()
+        message = data.get('textMessage')
+        amount = float(data.get('amount') or 0)
+
+        nlp_is_fraud, nlp_confidence = False, 0.0
+        tabular_is_fraud, tabular_confidence = False, 0.0
+        model_used = []
+
+        # --- IMPROVEMENT: Hybrid analysis. Always run NLP if text exists. ---
+        if message and sentiment_pipeline:
+            print(f"Analyzing text with FinBERT: '{message}'")
+            model_used.append('FinBERT')
+            sentiment_results = sentiment_pipeline(message)
+            nlp_is_fraud, nlp_confidence = interpret_sentiment(sentiment_results, message)
+
+        # Always run tabular if amount > 0.
+        if amount > 0 and tabular_model:
+            print(f"Analyzing transaction details. Amount: {amount}")
+            model_used.append('Tabular Model')
             
-        logger.info("✅ ML model and features loaded successfully.")
-    except Exception as e:
-        logger.error(f"❌ Failed to load ML model: {str(e)}")
-        ml_model = None
-        feature_names = None
-
-# Load all models when the application starts.
-load_nlp_pipeline()
-load_ml_model()
-
-# --- 3. API ENDPOINTS ---
-
-@app.route('/')
-def status():
-    """
-    Root endpoint to check if the server is running and what models are loaded.
-    This helps in debugging the connection from the frontend.
-    """
-    return jsonify({
-        "status": "Server is running",
-        "nlp_model_loaded": nlp_pipeline is not None,
-        "transaction_model_loaded": ml_model is not None
-    })
-
-@app.route('/predict_text', methods=['POST'])
-def predict_text():
-    """Analyzes text from the user to determine scam risk."""
-    if not nlp_pipeline:
-        logger.error("NLP pipeline not available for /predict_text request.")
-        return jsonify({'error': 'NLP model is not available on the server.'}), 500
-
-    json_data = request.get_json()
-    if not json_data or 'message' not in json_data or not json_data['message'].strip():
-        logger.warning("Invalid input for /predict_text: 'message' field is missing or empty.")
-        return jsonify({'error': 'Invalid input. A non-empty "message" field is required.'}), 400
-    
-    user_message = json_data['message']
-    
-    try:
-        logger.info(f"Analyzing text: '{user_message}'")
-        result = nlp_pipeline(user_message)[0]
-        label = result['label']
-        score = result['score']
-
-        # Define rules for determining risk level based on sentiment.
-        if label == 'NEGATIVE' and score > 0.9:
-            risk_level = 'DANGER'
-            advice = "This message shows strong signs of urgency and negativity, a common tactic in scams. **HIGH RISK**. Do not proceed. Cease communication and block the sender."
-        elif label == 'NEGATIVE':
-            risk_level = 'WARNING'
-            advice = "The tone of this message is negative, which could indicate pressure or manipulation. Proceed with extreme caution. Verify payment requests through a trusted channel."
-        else:
-            risk_level = 'SAFE'
-            advice = "The tone appears neutral. No immediate red flags, but always double-check recipient details before sending money."
-
-        logger.info(f"Text analysis result: {risk_level}, Score: {score:.2f}")
-        return jsonify({
-            'riskLevel': risk_level,
-            'advice': advice,
-            'detectedFlags': [f"Tone: {label}", f"Confidence: {score:.2f}"]
-        })
-
-    except Exception as e:
-        logger.error(f"Error during NLP analysis: {str(e)}")
-        return jsonify({'error': f'Failed to analyze message: {str(e)}'}), 500
-
-@app.route('/predict_transaction', methods=['POST'])
-def predict_transaction():
-    """Predicts fraud for a structured transaction."""
-    if not ml_model or not feature_names:
-        logger.error("ML model not available for /predict_transaction request.")
-        return jsonify({'error': 'The transaction prediction model is not available.'}), 500
-
-    json_data = request.get_json()
-    if not json_data:
-        logger.warning("Invalid input for /predict_transaction: JSON data is required.")
-        return jsonify({'error': 'Invalid input. JSON data is required.'}), 400
-
-    try:
-        # Create a DataFrame from the incoming JSON.
-        input_df = pd.DataFrame([json_data])
+            required_fields = ['step', 'oldbalanceOrg', 'newbalanceOrig', 'oldbalanceDest', 'newbalanceDest', 'type']
+            for field in required_fields:
+                if field == 'type': data[field] = data.get(field, 'TRANSFER')
+                else: data[field] = data.get(field) or 0
+            
+            df = pd.DataFrame([data])
+            df['hour'] = pd.to_numeric(df['step']) % 24
+            df['amount_ratio'] = pd.to_numeric(df['amount']) / (pd.to_numeric(df['oldbalanceOrg']) + 1e-6)
+            df['transaction_count'] = 1
+            
+            df_processed = pd.get_dummies(df, columns=['type'], drop_first=True, dtype=int)
+            df_processed = df_processed.reindex(columns=feature_names, fill_value=0)
+            df_processed = df_processed[feature_names]
+            
+            X_scaled = scaler.transform(df_processed)
+            tabular_confidence = tabular_model.predict_proba(X_scaled)[0][1]
+            tabular_is_fraud = tabular_confidence > 0.5
         
-        # --- Feature Engineering ---
-        # Recreate the same features used during model training.
-        input_df['hour'] = input_df['step'] % 24
-        input_df['amount_ratio'] = input_df['amount'] / (input_df['oldbalanceOrg'] + 1e-6)
-        input_df = input_df.drop(['nameOrig', 'nameDest'], axis=1, errors='ignore')
-        
-        # --- Pre-processing ---
-        # One-hot encode the 'type' column.
-        processed_df = pd.get_dummies(input_df, columns=['type'], drop_first=True, dtype=int)
-        # Align columns with the model's training features to prevent errors.
-        processed_df = processed_df.reindex(columns=feature_names, fill_value=0)
+        # --- Final Decision Logic ---
+        if not model_used:
+            return jsonify({'error': 'Input not suitable for any available model. Please provide a message or transaction details.'}), 400
 
-        # --- Prediction ---
-        prediction = ml_model.predict(processed_df)
-        probability = ml_model.predict_proba(processed_df)[:, 1]
+        # Combine results if both models ran
+        if 'FinBERT' in model_used and 'Tabular Model' in model_used:
+            # If text is clearly fraud, it overrides tabular. Otherwise, weigh them.
+            if nlp_is_fraud and nlp_confidence > 0.8:
+                final_confidence = nlp_confidence
+            else:
+                 # Give NLP a 60% weight and tabular a 40% weight
+                final_confidence = (0.6 * nlp_confidence if nlp_is_fraud else (1-nlp_confidence)*-0.6) + \
+                                   (0.4 * tabular_confidence)
+            final_model_name = 'Hybrid'
+        elif 'FinBERT' in model_used:
+            final_confidence = nlp_confidence if nlp_is_fraud else (1-nlp_confidence)
+            final_model_name = 'FinBERT'
+        else: # Only Tabular Model ran
+            final_confidence = tabular_confidence
+            final_model_name = 'Scikit-learn Tabular'
+            
+        is_fraud = final_confidence > 0.5
 
-        logger.info(f"Transaction prediction: isFraud={prediction[0]}, Probability={probability[0]:.4f}")
-        return jsonify({
-            'isFraudPrediction': int(prediction[0]),
-            'fraudProbability': float(probability[0])
-        })
+        # Final response preparation
+        response = {
+            'isFraud': bool(is_fraud),
+            'confidence': round(float(final_confidence if is_fraud else (1-final_confidence)) * 100, 2),
+            'modelUsed': final_model_name
+        }
+
+        print(f"Prediction result: {response}")
+        return jsonify(response)
 
     except Exception as e:
-        logger.error(f"Error during transaction prediction: {str(e)}", exc_info=True)
-        return jsonify({'error': f'Prediction failed: {str(e)}'}), 500
+        print(f"An unexpected error occurred during prediction: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': 'An internal error occurred.'}), 400
 
-# --- 4. MAIN EXECUTION BLOCK ---
+# --- Main Execution Block ---
 if __name__ == '__main__':
-    logger.info("Starting Flask server...")
-    # Run the app with debug=True for development. This provides detailed error
-    # messages and automatically reloads the server when you change the code.
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    load_models()
+    if sentiment_pipeline or tabular_model:
+        print("Starting Flask server...")
+        app.run(host='0.0.0.0', port=5000, debug=False)
+    else:
+        print("Flask server not started due to model loading failures.")
