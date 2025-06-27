@@ -7,22 +7,17 @@ from flask_cors import CORS
 from transformers import pipeline
 import re
 
-# --- Initialize Flask App ---
 app = Flask(__name__)
-CORS(app) 
+CORS(app)
 
-# --- Global Variables for Models ---
 sentiment_pipeline = None
 tabular_model = None
 scaler = None
 feature_names = None
 
-# --- Model Loading Function ---
 def load_models():
-    """Loads both the FinBERT sentiment model and the scikit-learn tabular model."""
     global sentiment_pipeline, tabular_model, scaler, feature_names
     
-    # 1. Load FinBERT Model for Sentiment Analysis
     try:
         print("Loading Hugging Face model: ProsusAI/finbert...")
         sentiment_pipeline = pipeline(
@@ -33,12 +28,11 @@ def load_models():
     except Exception as e:
         print(f"--- FATAL: Could not load FinBERT model. Error: {e} ---")
 
-    # 2. Load Scikit-learn Tabular Model
     try:
         print("Loading scikit-learn tabular model from 'all_models.pkl'...")
         with open('all_models.pkl', 'rb') as f:
             data = pickle.load(f)
-            tabular_model = data['models']['Stacked Ensemble'] 
+            tabular_model = data['models']['Stacked Ensemble']
             scaler = data['scaler']
             feature_names = data['feature_names']
         print("--- Scikit-learn tabular model loaded successfully! ---")
@@ -47,47 +41,70 @@ def load_models():
     except Exception as e:
         print(f"--- FATAL: Could not load scikit-learn model. Error: {e} ---")
 
-# --- IMPROVEMENT: Expanded keyword lists and new list for legitimate negative scenarios ---
 def interpret_sentiment(sentiment_result, text):
-    """
-    Interprets FinBERT sentiment to determine fraud risk. This version is more robust 
-    and handles legitimate negative alerts to reduce false positives.
-    """
     sentiment = sentiment_result[0]['label']
     score = sentiment_result[0]['score']
     text_lower = text.lower()
     
-    # Expanded keyword lists
-    positive_scam_keywords = ['won', 'lottery', 'claim', 'prize', 'cashback', 'winner', 'free giveaway']
-    neutral_scam_keywords = ['security deposit', 'verify your details', 'customs fee', 'pending bill', 'update kyc', 'confirm your details']
-    negative_scam_keywords = ['suspended', 'unusual activity', 'account blocked', 'action required', 'security breach']
+    positive_scam_keywords = [
+        'won', 'lottery', 'claim', 'prize', 'cashback', 'winner', 'free giveaway',
+        'congratulations you have won', 'exclusive reward', 'guaranteed profit',
+        'investment opportunity', 'risk-free', 'refund approved', 'inheritance',
+        'grant', 'stimulus', 'you are selected', 'special offer for you',
+        'subsidy approved', 'job offer', 'easy loan', 'double your money',
+        'government yojana', 'pm yojana benefit', 'gst refund', 'income tax refund',
+        'kaun banega crorepati', 'kbc lottery', 'free recharge'
+    ]
     
-    # EDGE CASE HANDLING: List of keywords that indicate a legitimate negative message
-    legitimate_negative_keywords = ['overdue', 'bill is due', 'late fee', 'payment reminder', 'low balance']
+    neutral_scam_keywords = [
+        'security deposit', 'verify your details', 'customs fee', 'pending bill',
+        'update kyc', 'confirm your details', 'account verification', 'login attempt',
+        'mandate', 'shipping fee', 'unlock', 'pending invoice', 'compliance check',
+        'document verification', 'confirm identity', 'transaction pending',
+        'background check fee', 'processing fee', 'registration fee', 'update pan card',
+        'link aadhaar', 'e-kyc verification', 'upi pin', 'scan qr for payment',
+        'block your sim', 'electricity bill will be disconnected', 'demat account',
+        'your parcel is on hold', 'customs clearance', 'work from home'
+    ]
+    
+    negative_scam_keywords = [
+        'suspended', 'unusual activity', 'account blocked', 'action required',
+        'security breach', 'account frozen', 'suspicious login', 'unauthorized transaction',
+        'compromised', 'legal action', 'warrant', 'account will be terminated',
+        'deactivation alert', 'immediate action required', 'fraud alert',
+        'your account is blocked by rbi', 'police case filed', 'cbi notice',
+        'illegal activity detected', 'your sim will be blocked', 
+        'electricity connection will be disconnected'
+    ]
+    
+    legitimate_negative_keywords = [
+        'overdue', 'bill is due', 'late fee', 'payment reminder', 'low balance',
+        'minimum balance', 'payment due', 'service charge', 'annual fee',
+        'transaction declined', 'insufficient funds', 'credit limit reached',
+        'emi due', 'automatic debit', 'upcoming payment', 'lic premium due',
+        'fastag low balance', 'gas cylinder booking', 'electricity bill generated',
+        'credit card statement', 'debit alert', 'fastag recharge'
+    ]
     
     if sentiment == 'negative':
-        # If the sentiment is negative, first check if it's a legitimate warning.
         if any(re.search(r'\b' + keyword + r'\b', text_lower) for keyword in legitimate_negative_keywords):
-            return False, score # It's a real but negative alert, not fraud.
-        # If no legitimate keywords are found, a negative sentiment is a strong fraud indicator.
-        # This also catches generic negative scam keywords.
+            return False, score
         is_fraud = True
-        confidence = score + (1 - score) * 0.5 # Boost confidence for negative alerts
+        confidence = score + (1 - score) * 0.5
         return is_fraud, confidence
 
     if sentiment == 'positive':
         if any(re.search(r'\b' + keyword + r'\b', text_lower) for keyword in positive_scam_keywords):
-            return True, 0.95 # Very high confidence for positive-keyword scams
+            return True, 0.95
         return False, score
 
     if sentiment == 'neutral':
         if any(re.search(r'\b' + keyword + r'\b', text_lower) for keyword in neutral_scam_keywords):
-            return True, 0.88 # High confidence for neutral-keyword scams
+            return True, 0.88
         return False, score
         
     return False, 0.0
 
-# --- API Endpoint for Prediction ---
 @app.route('/predict', methods=['POST'])
 def predict():
     if not sentiment_pipeline and not tabular_model:
@@ -102,14 +119,12 @@ def predict():
         tabular_is_fraud, tabular_confidence = False, 0.0
         model_used = []
 
-        # --- IMPROVEMENT: Hybrid analysis. Always run NLP if text exists. ---
         if message and sentiment_pipeline:
             print(f"Analyzing text with FinBERT: '{message}'")
             model_used.append('FinBERT')
             sentiment_results = sentiment_pipeline(message)
             nlp_is_fraud, nlp_confidence = interpret_sentiment(sentiment_results, message)
 
-        # Always run tabular if amount > 0.
         if amount > 0 and tabular_model:
             print(f"Analyzing transaction details. Amount: {amount}")
             model_used.append('Tabular Model')
@@ -132,30 +147,25 @@ def predict():
             tabular_confidence = tabular_model.predict_proba(X_scaled)[0][1]
             tabular_is_fraud = tabular_confidence > 0.5
         
-        # --- Final Decision Logic ---
         if not model_used:
             return jsonify({'error': 'Input not suitable for any available model. Please provide a message or transaction details.'}), 400
 
-        # Combine results if both models ran
         if 'FinBERT' in model_used and 'Tabular Model' in model_used:
-            # If text is clearly fraud, it overrides tabular. Otherwise, weigh them.
             if nlp_is_fraud and nlp_confidence > 0.8:
                 final_confidence = nlp_confidence
             else:
-                 # Give NLP a 60% weight and tabular a 40% weight
                 final_confidence = (0.6 * nlp_confidence if nlp_is_fraud else (1-nlp_confidence)*-0.6) + \
-                                   (0.4 * tabular_confidence)
+                                     (0.4 * tabular_confidence)
             final_model_name = 'Hybrid'
         elif 'FinBERT' in model_used:
             final_confidence = nlp_confidence if nlp_is_fraud else (1-nlp_confidence)
             final_model_name = 'FinBERT'
-        else: # Only Tabular Model ran
+        else:
             final_confidence = tabular_confidence
             final_model_name = 'Scikit-learn Tabular'
             
         is_fraud = final_confidence > 0.5
 
-        # Final response preparation
         response = {
             'isFraud': bool(is_fraud),
             'confidence': round(float(final_confidence if is_fraud else (1-final_confidence)) * 100, 2),
@@ -171,7 +181,6 @@ def predict():
         traceback.print_exc()
         return jsonify({'error': 'An internal error occurred.'}), 400
 
-# --- Main Execution Block ---
 if __name__ == '__main__':
     load_models()
     if sentiment_pipeline or tabular_model:
