@@ -3,127 +3,214 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fraud Detection Chatbot</title>
+    <title>Fraud Detection Assistant</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Inter', sans-serif; }
+        /* Custom Scrollbar */
         #chat-window::-webkit-scrollbar { width: 6px; }
         #chat-window::-webkit-scrollbar-track { background: #1f2937; }
         #chat-window::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 3px; }
-        .form-input { background-color: #1a202c; border: 1px solid #4a5568; color: #e2e8f0; border-radius: 0.5rem; padding: 0.5rem 1rem; width: 100%; transition: border-color 0.2s; }
-        .form-input:focus { outline: none; border-color: #3b82f6; }
+
+        /* Form Input Styling */
+        .form-input { 
+            background-color: #374151; /* Darker grey for inputs */
+            border: 1px solid #4b5563; 
+            color: #e2e8f0; 
+            border-radius: 0.5rem; 
+            padding: 0.75rem 1rem; 
+            width: 100%; 
+            transition: all 0.2s ease-in-out; 
+        }
+        .form-input:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 2px #1e40af; }
+        
+        /* Typing Indicator Animation */
         .typing-indicator span {
-            height: 8px;
-            width: 8px;
-            background-color: #9ca3af;
-            border-radius: 50%;
-            display: inline-block;
+            height: 8px; width: 8px; background-color: #9ca3af;
+            border-radius: 50%; display: inline-block;
             animation: bounce 1.4s infinite ease-in-out both;
         }
         .typing-indicator span:nth-child(1) { animation-delay: -0.32s; }
         .typing-indicator span:nth-child(2) { animation-delay: -0.16s; }
-        @keyframes bounce {
-            0%, 80%, 100% { transform: scale(0); }
-            40% { transform: scale(1.0); }
-        }
-        #detailed-analysis-form.hidden { display: none; }
+        @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1.0); } }
+
+        /* Smooth Transitions */
+        .collapsible { max-height: 0; overflow: hidden; transition: max-height 0.5s ease-in-out; }
+        .collapsible.open { max-height: 500px; /* Adjust as needed */ }
+        .chat-message { animation: fadeIn 0.5s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
     </style>
 </head>
-<body class="bg-gray-900 flex items-center justify-center min-h-screen">
-    <main class="bg-gray-800 text-white rounded-xl shadow-2xl w-full max-w-2xl h-[90vh] max-h-[800px] flex flex-col border border-gray-700">
-        <header class="p-4 border-b border-gray-700">
-            <h1 class="text-xl font-bold text-center text-blue-400">Fraud Detection Assistant</h1>
+<body class="bg-gray-900 flex items-center justify-center min-h-screen p-4">
+    
+    <!-- Main Chat Interface -->
+    <main class="bg-gray-800 text-white rounded-xl shadow-2xl w-full max-w-2xl h-[95vh] max-h-[900px] flex flex-col border border-gray-700">
+        <header class="p-4 border-b border-gray-700 flex justify-between items-center">
+            <h1 class="text-xl font-bold text-center text-blue-400 flex-1">Fraud Detection Assistant</h1>
+            <!-- Header Icons -->
+            <div class="flex items-center space-x-2">
+                <button id="info-btn" title="Information & Disclaimer" class="text-gray-400 hover:text-white transition-colors">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z" /></svg>
+                </button>
+                <button id="clear-chat-btn" title="Clear Chat" class="text-gray-400 hover:text-white transition-colors">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" /></svg>
+                </button>
+            </div>
         </header>
 
         <!-- Chat Window -->
         <div id="chat-window" class="flex-1 p-4 overflow-y-auto flex flex-col space-y-4">
-            <div class="bot-message self-start max-w-md">
-                <div class="bg-gray-700 rounded-lg p-3">
-                    <p>Hello! Paste a message for a quick NLP analysis, or expand the section below to enter full transaction details for a hybrid analysis.</p>
-                </div>
-            </div>
+            <!-- Initial bot message will be added by JS -->
         </div>
 
-        <!-- Detailed Analysis Section -->
-        <div class="p-4 border-y border-gray-700 bg-gray-800">
-            <button id="toggle-details-btn" class="w-full text-left font-semibold text-blue-400 hover:text-blue-300">
-                Enter Full Transaction Details for Hybrid Analysis &#9662;
+        <!-- Detailed Analysis Section (Collapsible) -->
+        <div class="p-4 border-y border-gray-700 bg-gray-800/50">
+            <button id="toggle-details-btn" class="w-full text-left font-semibold text-blue-400 hover:text-blue-300 transition-colors flex justify-between items-center">
+                <span>Enter Full Transaction Details for Hybrid Analysis</span>
+                <span id="toggle-arrow">&#9662;</span>
             </button>
-            <form id="detailed-analysis-form" class="hidden mt-4 space-y-4">
+            <form id="detailed-analysis-form" class="collapsible mt-4 space-y-4">
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <input type="number" id="step" class="form-input" placeholder="Step (e.g., 1)">
-                    <select id="type" class="form-input bg-gray-800"><option value="TRANSFER">TRANSFER</option><option value="CASH_OUT">CASH_OUT</option><option value="PAYMENT">PAYMENT</option></select>
-                    <input type="number" step="0.01" id="amount" class="form-input" placeholder="Amount (e.g., 180.50)">
-                    <input type="number" step="0.01" id="oldbalanceOrg" class="form-input" placeholder="Sender's old balance">
-                    <input type="number" step="0.01" id="newbalanceOrig" class="form-input" placeholder="Sender's new balance">
-                    <input type="number" step="0.01" id="oldbalanceDest" class="form-input" placeholder="Recipient's old balance">
+                    <input type="number" id="step" class="form-input" placeholder="Step (e.g., 1)" required>
+                    <select id="type" class="form-input"><option value="TRANSFER">TRANSFER</option><option value="CASH_OUT">CASH_OUT</option></select>
+                    <input type="number" step="0.01" id="amount" class="form-input" placeholder="Amount (e.g., 180.50)" required>
+                    <input type="number" step="0.01" id="oldbalanceOrg" class="form-input" placeholder="Sender's old balance" required>
+                    <input type="number" step="0.01" id="newbalanceOrig" class="form-input" placeholder="Sender's new balance" required>
+                    <input type="number" step="0.01" id="oldbalanceDest" class="form-input" placeholder="Recipient's old balance" required>
                 </div>
-                <!-- The new text box for hybrid analysis -->
-                <div>
-                    <textarea id="hybrid-text-message" class="form-input" rows="2" placeholder="Enter transaction message (optional)..."></textarea>
-                </div>
-                <button type="submit" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Analyze Full Transaction</button>
+                <div><textarea id="hybrid-text-message" class="form-input" rows="2" placeholder="Enter transaction message (optional)..."></textarea></div>
+                <button type="submit" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition-transform hover:scale-[1.02]">Analyze Full Transaction</button>
             </form>
         </div>
 
         <!-- Typing Indicator -->
-        <div id="typing-indicator" class="hidden p-4"><div class="bg-gray-700 rounded-lg p-3 inline-flex items-center"><div class="typing-indicator"><span></span><span></span><span></span></div></div></div>
+        <div id="typing-indicator" class="hidden p-4 chat-message"><div class="bg-gray-700 rounded-lg p-3 inline-flex items-center"><div class="typing-indicator"><span></span><span></span><span></span></div></div></div>
 
         <!-- Chat Input Form -->
         <footer class="p-4">
             <form id="chat-form" class="flex items-center space-x-3">
-                <input type="text" id="chat-input" class="flex-1 bg-gray-700 border border-gray-600 focus:ring-blue-500 focus:border-blue-500 rounded-lg p-3" placeholder="Type a message for quick analysis..." autocomplete="off">
+                <input type="text" id="chat-input" class="flex-1 form-input" placeholder="Type or paste a message for analysis..." autocomplete="off">
                 <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-bold p-3 rounded-full transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" /></svg></button>
             </form>
         </footer>
     </main>
+
+    <!-- Info Modal -->
+    <div id="info-modal" class="hidden fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center p-4 z-50">
+        <div class="bg-gray-800 text-white rounded-lg shadow-xl max-w-lg w-full border border-gray-600">
+            <div class="p-4 border-b border-gray-700 flex justify-between items-center">
+                <h2 class="text-lg font-bold">About & Disclaimer</h2>
+                <button id="close-modal-btn" class="text-gray-400 hover:text-white">&times;</button>
+            </div>
+            <div class="p-6 space-y-4 text-gray-300">
+                <p>This tool uses a hybrid AI model to assess the risk of fraud in financial messages and transactions. It is for informational purposes only.</p>
+                <p><strong class="text-yellow-400">Disclaimer:</strong> The AI's analysis is not guaranteed to be 100% accurate. Always use caution and common sense. Never share personal information, passwords, or OTPs.</p>
+                <div>
+                    <strong class="text-white">Safety Tips:</strong>
+                    <ul class="list-disc list-inside mt-2 space-y-1">
+                        <li>Be wary of unexpected prizes, job offers, or threats.</li>
+                        <li>Verify requests through official channels (e.g., call your bank directly).</li>
+                        <li>Never feel pressured to act immediately. Scammers create false urgency.</li>
+                    </ul>
+                </div>
+                <p>For reporting fraud in India, visit <a href="https://cybercrime.gov.in/" target="_blank" class="text-blue-400 hover:underline">cybercrime.gov.in</a>.</p>
+            </div>
+        </div>
+    </div>
+
+
     <script>
+        // --- Element References ---
         const chatForm = document.getElementById('chat-form');
         const chatInput = document.getElementById('chat-input');
         const detailedForm = document.getElementById('detailed-analysis-form');
         const chatWindow = document.getElementById('chat-window');
         const typingIndicator = document.getElementById('typing-indicator');
         const toggleBtn = document.getElementById('toggle-details-btn');
-        const API_URL = 'http://127.0.0.1:5000/predict';
+        const toggleArrow = document.getElementById('toggle-arrow');
+        const clearChatBtn = document.getElementById('clear-chat-btn');
+        const infoBtn = document.getElementById('info-btn');
+        const infoModal = document.getElementById('info-modal');
+        const closeModalBtn = document.getElementById('close-modal-btn');
+        
+        // --- API Configuration ---
+        const API_URL = 'http://127.0.0.1:5000/predict'; // IMPORTANT: Make sure this URL is correct
 
-        // --- Event Listener for toggling the detailed form ---
-        toggleBtn.addEventListener('click', () => {
+        // --- Event Listeners ---
+        document.addEventListener('DOMContentLoaded', addInitialBotMessage);
+        toggleBtn.addEventListener('click', toggleDetailedForm);
+        chatForm.addEventListener('submit', handleChatSubmit);
+        detailedForm.addEventListener('submit', handleDetailedSubmit);
+        clearChatBtn.addEventListener('click', resetChat);
+        infoBtn.addEventListener('click', () => infoModal.classList.remove('hidden'));
+        closeModalBtn.addEventListener('click', () => infoModal.classList.add('hidden'));
+        infoModal.addEventListener('click', (e) => { if (e.target === infoModal) infoModal.classList.add('hidden'); });
+
+        // --- Core Functions ---
+
+        function addInitialBotMessage() {
+            const initialHtml = `<div class="bg-gray-700 rounded-lg p-3">
+                <p>Hello! I can help you detect potential fraud. Paste a message for a quick analysis, or expand the section below for a more detailed check.</p>
+                <div class="mt-3">
+                    <p class="text-xs text-gray-400 mb-1">Try an example:</p>
+                    <button class="example-btn">Congratulations you have won a $1000 prize click here to claim</button>
+                    <button class="example-btn">Your electricity bill is pending and will be disconnected tonight. Contact 8xxxxxxxxx</button>
+                </div>
+            </div>`;
+            appendBotMessageHTML(initialHtml);
+            // Add listeners to the newly created example buttons
+            document.querySelectorAll('.example-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    chatInput.value = btn.textContent;
+                    chatForm.requestSubmit(); // Programmatically submit the form
+                });
+            });
+        }
+
+        function toggleDetailedForm() {
             const form = document.getElementById('detailed-analysis-form');
-            const isHidden = form.classList.contains('hidden');
-            form.classList.toggle('hidden');
-            toggleBtn.innerHTML = isHidden 
-                ? 'Hide Transaction Details &#9652;' 
-                : 'Enter Full Transaction Details for Hybrid Analysis &#9662;';
-        });
+            const isOpen = form.classList.contains('open');
+            form.classList.toggle('open');
+            toggleArrow.innerHTML = isOpen ? '&#9662;' : '&#9652;';
+        }
 
-        // --- Event Listener for the main CHATBOT form ---
-        chatForm.addEventListener('submit', async (event) => {
+        async function handleChatSubmit(event) {
             event.preventDefault();
             const message = chatInput.value.trim();
             if (!message) return;
-            appendUserMessage(message, 'chat');
+            appendUserMessage(message);
             chatInput.value = '';
-            await sendRequest({ textMessage: message, amount: 0 }); // Explicitly set amount to 0 for NLP-only mode
-        });
+            await sendRequest({ textMessage: message, amount: 0 });
+        }
 
-        // --- Event Listener for the DETAILED form ---
-        detailedForm.addEventListener('submit', async (event) => {
+        async function handleDetailedSubmit(event) {
             event.preventDefault();
+            const amountInput = document.getElementById('amount');
+            if (!amountInput.value || parseFloat(amountInput.value) <= 0) {
+                 appendErrorMessage("The 'Amount' field is required for a full transaction analysis.");
+                 return;
+            }
+
             const formData = {
                 textMessage: document.getElementById('hybrid-text-message').value,
                 step: document.getElementById('step').value,
                 type: document.getElementById('type').value,
-                amount: document.getElementById('amount').value,
+                amount: amountInput.value,
                 oldbalanceOrg: document.getElementById('oldbalanceOrg').value,
                 newbalanceOrig: document.getElementById('newbalanceOrig').value,
-                oldbalanceDest: document.getElementById('oldbalanceDest').value
+                oldbalanceDest: document.getElementById('oldbalanceDest').value,
+                // Add a default for the missing field
+                newbalanceDest: document.getElementById('newbalanceDest')?.value || 0
             };
-            appendUserMessage('Submitted full transaction details for analysis.', 'form');
+            appendUserMessage('Submitted full transaction details for analysis.');
             await sendRequest(formData);
-        });
+            detailedForm.reset();
+            if(detailedForm.classList.contains('open')) toggleDetailedForm();
+        }
 
         async function sendRequest(data) {
             showTypingIndicator();
@@ -134,66 +221,98 @@
                     body: JSON.stringify(data)
                 });
                 if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({error: 'Server returned an invalid response'}));
-                    throw new Error(errorData.error || `Network response was not ok. Status: ${response.status}`);
+                    const errorData = await response.json().catch(() => ({error: 'Server returned an unreadable error.'}));
+                    throw new Error(errorData.error || `Error ${response.status}: The server responded, but there was a problem.`);
                 }
                 const result = await response.json();
+                // ** MOCKING REASONS FOR DEMO **
+                // In a real app, the backend would return these.
+                if (result.isFraud) {
+                    result.reasons = ["Uses urgent language ('tonight').", "Asks for direct contact to a personal number.", "Threatens a service disconnection."];
+                } else {
+                     result.reasons = ["Common transaction type.", "No suspicious keywords detected."];
+                }
                 appendBotResponse(result);
             } catch (error) {
                 console.error("Error calling backend:", error);
-                appendErrorMessage(error.message || "Could not connect to the analysis service.");
+                const friendlyError = "Could not connect to the analysis service. Please ensure the backend server is running and accessible.";
+                appendErrorMessage(friendlyError);
             } finally {
                 hideTypingIndicator();
             }
         }
 
+        function resetChat() {
+            chatWindow.innerHTML = '';
+            addInitialBotMessage();
+        }
+
         // --- UI Helper Functions ---
-        function appendUserMessage(message, type) {
+        
+        function appendUserMessage(message) {
             const messageDiv = document.createElement('div');
-            messageDiv.className = 'user-message self-end max-w-md';
-            const text = type === 'chat' ? escapeHTML(message) : `<i>${escapeHTML(message)}</i>`;
-            messageDiv.innerHTML = `<div class="bg-blue-600 text-white rounded-lg p-3">${text}</div>`;
+            messageDiv.className = 'user-message self-end max-w-lg chat-message';
+            messageDiv.innerHTML = `<div class="bg-blue-600 text-white rounded-lg p-3 break-words">${escapeHTML(message)}</div>`;
             chatWindow.appendChild(messageDiv);
             scrollToBottom();
         }
 
         function appendBotResponse(result) {
-            const botMessageDiv = document.createElement('div');
-            botMessageDiv.className = 'bot-message self-start max-w-md';
-            const confidenceColor = result.isFraud ? 'red' : 'green';
-            const riskLevel = result.isFraud ? 'High Risk' : 'Low Risk';
-            const warningText = result.isFraud 
-                ? '<strong>Warning:</strong> This transaction shows indicators of fraud.'
-                : '<strong>Notice:</strong> This transaction appears to be legitimate.';
-            botMessageDiv.innerHTML = `<div class="bg-gray-700 rounded-lg p-3 space-y-3"><p class="font-semibold text-${confidenceColor}-300">${warningText}</p><div><span class="text-xs font-medium text-gray-400">Analysis by: ${result.modelUsed}</span><div class="w-full bg-gray-600 rounded-full h-2.5 mt-1"><div class="h-2.5 rounded-full bg-gradient-to-r from-${confidenceColor}-500 to-${confidenceColor}-400" style="width: ${result.confidence}%"></div></div><p class="text-right text-sm font-semibold mt-1">Confidence (${riskLevel}): ${result.confidence}%</p></div></div>`;
-            chatWindow.appendChild(botMessageDiv);
+            const { isFraud, confidence, modelUsed, reasons = [] } = result;
+            const confidenceColor = isFraud ? 'red' : 'green';
+            const riskLevel = isFraud ? 'High Risk' : 'Low Risk';
+            const advice = isFraud 
+                ? '<strong>Next Steps:</strong> Do NOT click any links, call numbers, or share personal info. Contact your bank or service provider through their official website or app.'
+                : '<strong>Notice:</strong> This transaction appears to be legitimate based on our analysis. Always remain vigilant.';
+
+            const reasonsHtml = reasons.map(reason => `<li class="text-sm">${escapeHTML(reason)}</li>`).join('');
+
+            const responseHtml = `
+                <div class="bg-gray-700 rounded-lg p-4 space-y-3">
+                    <div class="flex items-start gap-3">
+                        <div class="w-12 h-12 flex-shrink-0 rounded-full flex items-center justify-center bg-${confidenceColor}-500/20 text-${confidenceColor}-300">
+                           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-7 h-7">
+                             ${isFraud ? '<path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.008v.008H12v-.008Z" />' : '<path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />'}
+                           </svg>
+                        </div>
+                        <div>
+                            <p class="font-semibold text-${confidenceColor}-300 text-lg">${riskLevel} Detected</p>
+                            <p class="text-xs text-gray-400">Confidence: ${confidence}% | Model: ${modelUsed}</p>
+                        </div>
+                    </div>
+                    <div class="border-t border-gray-600 pt-3">
+                        <strong class="text-white">Analysis Breakdown:</strong>
+                        <ul class="list-disc list-inside mt-1 text-gray-300 space-y-1">${reasonsHtml}</ul>
+                    </div>
+                    <div class="border-t border-gray-600 pt-3 text-gray-300">
+                       <p>${advice}</p>
+                    </div>
+                </div>`;
+            appendBotMessageHTML(responseHtml);
+        }
+
+        function appendBotMessageHTML(html) {
+             const messageDiv = document.createElement('div');
+            messageDiv.className = 'bot-message self-start max-w-lg w-full chat-message';
+            messageDiv.innerHTML = html;
+
+            // Make example buttons pretty
+            messageDiv.querySelectorAll('.example-btn').forEach(btn => {
+                btn.className = 'text-left text-sm text-blue-300 bg-gray-600/50 hover:bg-gray-600/80 p-2 rounded-md mt-1 w-full transition-colors';
+            });
+            chatWindow.appendChild(messageDiv);
             scrollToBottom();
         }
 
         function appendErrorMessage(message) {
-            const errorDiv = document.createElement('div');
-            errorDiv.className = 'bot-message self-start max-w-md';
-            errorDiv.innerHTML = `<div class="bg-yellow-500/20 text-yellow-300 border border-yellow-500 rounded-lg p-3"><strong>Error:</strong> ${escapeHTML(message)}</div>`;
-            chatWindow.appendChild(errorDiv);
-            scrollToBottom();
+            const errorHtml = `<div class="bg-red-500/20 text-red-300 border border-red-500 rounded-lg p-3"><strong>Error:</strong> ${escapeHTML(message)}</div>`;
+            appendBotMessageHTML(errorHtml);
         }
 
-        function showTypingIndicator() {
-            typingIndicator.classList.remove('hidden');
-            scrollToBottom();
-        }
-
-        function hideTypingIndicator() {
-            typingIndicator.classList.add('hidden');
-        }
-
-        function scrollToBottom() {
-            chatWindow.scrollTop = chatWindow.scrollHeight;
-        }
-        
-        function escapeHTML(str) {
-            return str.replace(/[&<>"']/g, match => ({'&': '&amp;','<': '&lt;','>': '&gt;','"': '&quot;',"'": '&#39;'}[match]));
-        }
+        function showTypingIndicator() { typingIndicator.classList.remove('hidden'); scrollToBottom(); }
+        function hideTypingIndicator() { typingIndicator.classList.add('hidden'); }
+        function scrollToBottom() { chatWindow.scrollTop = chatWindow.scrollHeight; }
+        function escapeHTML(str) { return str.replace(/[&<>"']/g, match => ({'&': '&amp;','<': '&lt;','>': '&gt;','"': '&quot;',"'": '&#39;'}[match])); }
     </script>
 </body>
 </html>
