@@ -173,5 +173,3 @@ You can send either just the message, just transaction data, or both.
 MIT License — Feel free to use, modify, and contribute!
 
 ---
-
-Would you like me to generate the `requirements.txt` file for you as well?
